@@ -7,6 +7,7 @@ var async = require('async');
 var nedb = require('nedb');
 var path = require('path');
 var Filesystem = require('machinepack-fs');
+var uuidv4 = require('uuid/v4');
 
 var normalizeWhere = require('./lib/normalize-where');
 
@@ -86,7 +87,9 @@ module.exports = (function sailsDisk () {
         primaryKeyCols: {},
         // We'll keep track of every `ref` column in each model in this datastore in this dictionary,
         // indexed by table name.
-        refCols: {}
+        refCols: {},
+
+        primaryKeyUUIDCols: [],
       };
 
       // Add the datastore to the `datastores` dictionary.
@@ -162,8 +165,13 @@ module.exports = (function sailsDisk () {
               // If the attribute has `autoIncrement` on it, and it's the primary key,
               // initialize a sequence for it.
               if (wlsAttrDef.autoMigrations && wlsAttrDef.autoMigrations.autoIncrement && (attributeName === modelDef.primaryKey)) {
-                sequenceName = modelDef.tableName + '_' + wlsAttrDef.columnName + '_seq';
-                datastore.sequences[sequenceName] = 0;
+                
+                if(wlsAttrDef.type === 'string'){
+                  datastore.primaryKeyUUIDCols.push(modelDef.tableName);
+                }else{
+                  sequenceName = modelDef.tableName + '_' + wlsAttrDef.columnName + '_seq';
+                  datastore.sequences[sequenceName] = 0;
+                }
               }
 
               datastore.refCols[modelDef.tableName] = datastore.refCols[modelDef.tableName] || [];
@@ -273,10 +281,11 @@ module.exports = (function sailsDisk () {
       // does not have a value set, set it to the next value of the sequence.
       var primaryKeyCol = datastore.primaryKeyCols[query.using];
       var sequenceName = query.using + '_' + primaryKeyCol + '_seq';
-      if (!_.isUndefined(datastore.sequences[sequenceName]) && _.isNull(query.newRecord[primaryKeyCol]) || query.newRecord[primaryKeyCol] === 0) {
+      if(_.isNull(query.newRecord[primaryKeyCol]) && datastore.primaryKeyUUIDCols.includes(query.using)){
+        query.newRecord[primaryKeyCol] = uuidv4();
+      } else if (!_.isUndefined(datastore.sequences[sequenceName]) && _.isNull(query.newRecord[primaryKeyCol]) || query.newRecord[primaryKeyCol] === 0) {
         query.newRecord[primaryKeyCol] = ++datastore.sequences[sequenceName];
       }
-
       // If the primary key col for this table isn't `_id`, set `_id` to the primary key value.
       if (primaryKeyCol !== '_id') { query.newRecord._id = query.newRecord[primaryKeyCol]; }
 
@@ -720,6 +729,9 @@ module.exports = (function sailsDisk () {
       // Re-create any unique indexes.
       _.each(definition, function(val, columnName) {
         // If the attribute has `unique` set on it, or it's the primary key, add a unique index.
+        if(columnName === 'id' && val.type === 'string'){
+          datastore.primaryKeyUUIDCols.push(tableName);
+        }
         if (val.unique || val.primaryKey) {
           db.ensureIndex({
             fieldName: columnName,
