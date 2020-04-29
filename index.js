@@ -90,7 +90,6 @@ module.exports = (function sailsDisk () {
         refCols: {},
 
         primaryKeyUUIDCols: [],
-        objectCols: [],
       };
 
       // Add the datastore to the `datastores` dictionary.
