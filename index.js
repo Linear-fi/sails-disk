@@ -90,6 +90,7 @@ module.exports = (function sailsDisk () {
         refCols: {},
 
         primaryKeyUUIDCols: [],
+        objectCols: [],
       };
 
       // Add the datastore to the `datastores` dictionary.
@@ -518,34 +519,62 @@ module.exports = (function sailsDisk () {
       // If the primary key col for this table isn't `_id`, set `_id` to the primary key value.
       if (primaryKeyCol !== '_id' && query.valuesToSet[primaryKeyCol]) { query.valuesToSet._id = query.valuesToSet[primaryKeyCol]; }
 
-      // Update the documents in the db.
-      db.update(where, {'$set': query.valuesToSet}, {multi: true, returnUpdatedDocs: true}, function(err, numAffected, updatedRecords) {
-        if (err) {
-          if (err.errorType === 'uniqueViolated') {
-            err.footprint = {
-              identity: 'notUnique'
-            };
-            // If we can infer which attribute this refers to, add a `keys` array to the error.
-            // First, see if only one value in the updated data matches the value that triggered the uniqueness violation.
-            if (_.filter(_.values(query.valuesToSet), function (val) {return val === err.key;}).length === 1) {
-              // If so, find the key (i.e. column name) that this value was assigned to, add set that in the `keys` array.
-              err.footprint.keys = [_.findKey(query.valuesToSet, function(val) {return val === err.key;})];
-            } else {
-              err.footprint.keys = [];
-            }
-          }
-          return cb(err);
-        }//-•
-        if (query.meta && query.meta.fetch) {
-          // If the primary key col for this table isn't `_id`, exclude it from the returned records.
-          if (primaryKeyCol !== '_id') {
-            updatedRecords = _.map(updatedRecords, function(updatedRecord) {delete updatedRecord._id; return updatedRecord;});
-          }
 
-          return cb(undefined, updatedRecords);
-        }//-•
-        return cb();
+
+      
+      adapter.find(datastoreName, _.cloneDeep(query), function(err, records) {
+
+        // A bit hacky fix for values that are objects resetting on update.
+
+        const onlyObjects = (data) => Object.entries(data).reduce((total, [key, value]) => {
+          if (value && !Array.isArray(value) && typeof value === "object") {
+            return { ...total, [key]: value };
+          }
+          return total;
+        }, {});
+
+
+        const objectFix = records.length === 1 ? onlyObjects(records[0]) : {};
+
+        const valuesToSet = {...query.valuesToSet, ...objectFix }
+
+        // Update the documents in the db.
+        db.update(where, {$set: valuesToSet}, {multi: false, returnUpdatedDocs: true}, function(err, numAffected, updatedRecords) {
+          if (err) {
+            if (err.errorType === 'uniqueViolated') {
+              err.footprint = {
+                identity: 'notUnique'
+              };
+              // If we can infer which attribute this refers to, add a `keys` array to the error.
+              // First, see if only one value in the updated data matches the value that triggered the uniqueness violation.
+              if (_.filter(_.values(query.valuesToSet), function (val) {return val === err.key;}).length === 1) {
+                // If so, find the key (i.e. column name) that this value was assigned to, add set that in the `keys` array.
+                err.footprint.keys = [_.findKey(query.valuesToSet, function(val) {return val === err.key;})];
+              } else {
+                err.footprint.keys = [];
+              }
+            }
+            return cb(err);
+          }//-•
+          if (query.meta && query.meta.fetch) {
+            // If the primary key col for this table isn't `_id`, exclude it from the returned records.
+            if (primaryKeyCol !== '_id' && updatedRecords) {
+              if(Array.isArray(updatedRecords)){
+                updatedRecords = _.map(updatedRecords, function(updatedRecord) {delete updatedRecord._id; return updatedRecord;});
+              } else {
+                delete updatedRecords._id;
+                updatedRecords = [updatedRecords];
+              }
+              
+            }
+
+            return cb(undefined, updatedRecords);
+          }//-•
+          return cb();
+        });
       });
+
+
 
     },
 
