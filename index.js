@@ -526,7 +526,7 @@ module.exports = (function sailsDisk () {
         // A bit hacky fix for values that are objects resetting on update.
 
         const onlyObjects = (data) => Object.entries(data).reduce((total, [key, value]) => {
-          if (value && !Array.isArray(value) && typeof value === "object") {
+          if (value && typeof value === "object") {
             return { ...total, [key]: value };
           }
           return total;
